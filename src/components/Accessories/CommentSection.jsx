@@ -5,6 +5,7 @@ import { Link, useNavigate } from "react-router-dom";
 import summaryApi from "../../common";
 import Comments from "./Comments";
 import { HiOutlineExclamationCircle } from "react-icons/hi";
+import { supabase } from "@/helpers/supabase-config";
 
 function CommentSection({ postId }) {
   const { currentUser } = useSelector((state) => state.user);
@@ -15,6 +16,110 @@ function CommentSection({ postId }) {
   const [commentToDelete, setCommentToDelete] = useState(null);
 
   const navigate = useNavigate();
+
+
+  const syncCommentToSupabase = async (commentData) => {
+    try {
+      const { error } = await supabase
+        .from('comments')
+        .upsert({
+          id: commentData._id,
+          content: commentData.content,
+          post_id: commentData.postId,
+          user_id: currentUser?.rest?._id, // Use your Firebase/Redux user ID
+          user_name: currentUser?.rest?.userName,
+          profile_picture: currentUser?.rest?.profilePicture,
+          number_of_likes: commentData.numberOfLikes || 0,
+          likes: commentData.likes || [],
+          created_at: commentData.createdAt || new Date().toISOString()
+        });
+  
+      if (error) {
+        console.error("Supabase error:", error);
+        throw error;
+      }
+    } catch (error) {
+      console.error("Error syncing to Supabase:", error);
+    }
+  };
+
+  // Set up real-time subscription
+  useEffect(() => {
+    // Set up real-time subscription
+    const channel = supabase
+      .channel(`comments-${postId}`)
+      .on(
+        'postgres_changes',
+        {
+          event: '*', // Listen to all events
+          schema: 'public',
+          table: 'comments',
+          filter: `post_id=eq.${postId}`
+        },
+        (payload) => {
+          console.log('Received real-time update:', payload);
+          
+          switch (payload.eventType) {
+            case 'INSERT':
+              // Add new comment to state
+              setComments(prevComments => {
+                // Check if comment already exists to prevent duplicates
+                const exists = prevComments.some(comment => comment._id === payload.new.id);
+                if (exists) return prevComments;
+                
+                const newComment = {
+                  _id: payload.new.id,
+                  content: payload.new.content,
+                  userId: payload.new.user_id,
+                  postId: payload.new.post_id,
+                  numberOfLikes: payload.new.number_of_likes,
+                  likes: payload.new.likes,
+                  user: {
+                    userName: payload.new.user_name,
+                    profilePicture: payload.new.profile_picture
+                  },
+                  createdAt: payload.new.created_at
+                };
+                return [newComment, ...prevComments];
+              });
+              break;
+              
+            case 'UPDATE':
+              // Update existing comment
+              setComments(prevComments => 
+                prevComments.map(comment => 
+                  comment._id === payload.new.id 
+                    ? { 
+                        ...comment,
+                        content: payload.new.content,
+                        numberOfLikes: payload.new.number_of_likes,
+                        likes: payload.new.likes
+                      } 
+                    : comment
+                )
+              );
+              break;
+              
+            case 'DELETE':
+              // Remove deleted comment
+              setComments(prevComments => 
+                prevComments.filter(comment => comment._id !== payload.old.id)
+              );
+              break;
+          }
+        }
+      )
+      .subscribe();
+  
+    // Cleanup subscription on unmount
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, [postId]);
+
+
+
+
 
   const fetchComments = async () => {
     try {
@@ -29,6 +134,8 @@ function CommentSection({ postId }) {
 
       if (response.ok && data.success) {
         setComments(data.data);
+        data.data.forEach(syncCommentToSupabase);
+
       } else {
         console.error("Failed to fetch comments:", data.message);
       }
@@ -58,9 +165,12 @@ function CommentSection({ postId }) {
       });
       const data = await response.json();
       if (response.ok) {
+        await syncCommentToSupabase(data.data);
         setComment("");
         setCommentError(null);
-        setComments([data, ...comments]);
+        // setComments([data, ...comments]);
+        // Fetch comments again after successful post
+
         // Fetch comments again after successful post
         fetchComments();
       } else {
@@ -106,6 +216,7 @@ function CommentSection({ postId }) {
               : comment
           )
         );
+        await syncCommentToSupabase(data.data)
       } else {
         console.error("Failed to like comment:", data.message);
       }
@@ -138,6 +249,7 @@ function CommentSection({ postId }) {
               : comment
           )
         );
+        await syncCommentToSupabase(data.data)
       } else {
         // Handle error messages from the backend
         console.error("Failed to edit comment:", data.message);
@@ -168,6 +280,13 @@ function CommentSection({ postId }) {
       if (response.ok) {
         setComments(comments.filter((comment) => comment._id !== commentId));
         setShowModal(false); 
+
+        await supabase
+        .from('comments')
+        .delete()
+        .eq('id', commentId);
+
+
       } else {
         console.error("Failed to delete comment");
       }
