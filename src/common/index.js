@@ -1,4 +1,4 @@
-const backendUrl = 'http://localhost:8000'
+const backendUrl = 'https://spectrum-blog-server.onrender.com'
 
 
 const summaryApi ={
