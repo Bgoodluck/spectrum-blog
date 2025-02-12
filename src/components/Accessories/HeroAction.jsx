@@ -84,7 +84,7 @@ const HeroAction = () => {
                     </p>
                     {advert.price && (
                       <p className="text-sm sm:text-lg font-bold text-green-600 dark:text-green-500 mb-1 sm:mb-2">
-                        ${advert.price}
+                        £{advert.price}
                       </p>
                     )}
                   </div>
