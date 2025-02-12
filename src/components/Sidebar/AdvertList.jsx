@@ -125,7 +125,7 @@ const AdvertList = () => {
                                     
                                     {advert.price && (
                                         <p className="text-lg font-semibold text-green-600 mt-2">
-                                            Price: ${advert.price}
+                                            Price: £{advert.price}
                                         </p>
                                     )}
                                     
